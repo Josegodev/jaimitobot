@@ -75,6 +75,8 @@ TELEGRAM_ALLOWED_CHAT_IDS=
 
 No subas `.env` a GitHub. Este repositorio ignora `.env` mediante `.gitignore`.
 
+El archivo `.env` es solo para desarrollo local. En despliegues como Railway, las variables deben configurarse desde el panel del proveedor.
+
 ## Ejecucion
 
 ```bash
@@ -84,6 +86,50 @@ python telegram_web_assistant/jaimito_bot.py
 El bot usa polling. No necesitas FastAPI, webhooks ni servidor HTTP.
 
 Si falta `TELEGRAM_BOT_TOKEN`, el bot falla al arrancar con un mensaje claro. Si falta `OPENAI_API_KEY`, los comandos que llaman a OpenAI responderan con error controlado.
+
+## Variables de entorno
+
+| Variable | Obligatoria | Valor recomendado | Uso |
+| --- | --- | --- | --- |
+| `TELEGRAM_BOT_TOKEN` | Si | Sin valor por defecto | Token del bot creado con BotFather. |
+| `OPENAI_API_KEY` | Si para `/pregunta`, `/web` y menciones | Sin valor por defecto | Clave de OpenAI. No debe imprimirse ni subirse al repositorio. |
+| `OPENAI_MODEL` | No | `gpt-4o-mini` | Modelo usado para responder. |
+| `DEFAULT_TEMPERATURE` | No | `0.2` | Controla la variacion de las respuestas. Valor bajo para respuestas consistentes. |
+| `TELEGRAM_ALLOWED_CHAT_IDS` | No | Vacio en desarrollo | Lista de chats autorizados separados por comas. Recomendado en clase real. |
+
+## Despliegue en Railway
+
+Este proyecto esta preparado para desplegarse en Railway como worker Python 24/7, sin FastAPI, sin webhooks y sin Docker.
+
+Archivos usados por Railway desde la raiz del repositorio:
+
+- `requirements.txt`: dependencias Python.
+- `runtime.txt`: version de Python (`python-3.12`).
+- `Procfile`: proceso worker.
+
+Comando de arranque configurado:
+
+```bash
+python telegram_web_assistant/jaimito_bot.py
+```
+
+Pasos:
+
+1. Sube el repositorio a GitHub.
+2. En Railway, crea un nuevo proyecto desde el repositorio.
+3. Configura el servicio como worker si Railway no lo detecta automaticamente.
+4. En `Variables`, crea:
+   - `TELEGRAM_BOT_TOKEN`
+   - `OPENAI_API_KEY`
+   - `OPENAI_MODEL`
+   - `DEFAULT_TEMPERATURE`
+   - `TELEGRAM_ALLOWED_CHAT_IDS`
+5. Despliega el servicio.
+6. Comprueba en los logs que aparece el evento `bot_start`.
+
+En Railway no se sube `.env`. Las claves se configuran desde `Variables`.
+
+Para una clase real, configura `TELEGRAM_ALLOWED_CHAT_IDS` con el id del grupo para evitar uso fuera del entorno autorizado.
 
 ## Como crear y anadir el bot a Telegram
 
