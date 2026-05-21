@@ -46,7 +46,7 @@ source .venv/bin/activate
 Instala dependencias:
 
 ```bash
-pip install -r telegram_web_assistant/requirements.txt
+pip install -r requirements.txt
 ```
 
 ## Configuracion del .env

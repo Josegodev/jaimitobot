@@ -1,0 +1,16 @@
+.env
+*.env
+.venv
+venv/
+.git
+.git-local
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+logs/
+*.log
+README.md
+.DS_Store
+*.tmp
+*.temp
