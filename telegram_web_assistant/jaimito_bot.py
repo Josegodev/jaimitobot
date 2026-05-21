@@ -1,0 +1,237 @@
+import re
+
+from telegram import Update
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    ContextTypes,
+    MessageHandler,
+    filters,
+)
+
+from config import Settings, load_settings
+from logging_utils import configure_logging, log_event, new_trace_id
+from openai_client import OpenAIClientError, ask_openai
+from prompts import PLANTILLA_WEB, RUBRICA, WEB_CONTEXT
+
+
+MAX_TELEGRAM_MESSAGE_LENGTH = 3900
+
+
+def _settings(context: ContextTypes.DEFAULT_TYPE) -> Settings:
+    return context.application.bot_data["settings"]
+
+
+def _is_allowed(update: Update, settings: Settings) -> bool:
+    chat = update.effective_chat
+    if not chat or not settings.whitelist_enabled:
+        return True
+    return chat.id in settings.telegram_allowed_chat_ids
+
+
+async def _send_text(update: Update, text: str) -> None:
+    if not update.effective_message:
+        return
+    await update.effective_message.reply_text(text[:MAX_TELEGRAM_MESSAGE_LENGTH])
+
+
+async def _reject_if_unauthorized(update: Update, settings: Settings) -> bool:
+    if _is_allowed(update, settings):
+        return False
+    chat = update.effective_chat
+    user = update.effective_user
+    log_event(
+        "unauthorized_chat",
+        chat_id=chat.id if chat else None,
+        user_id=user.id if user else None,
+        status="ignored",
+    )
+    await _send_text(update, "Este chat no esta autorizado para usar Jaimito.")
+    return True
+
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    settings = _settings(context)
+    if await _reject_if_unauthorized(update, settings):
+        return
+    await _send_text(
+        update,
+        "Soy Jaimito, un asistente para el curso de IA aplicada. "
+        "Te ayudo a preparar una web estatica de proyecto para GitHub Pages.\n\n"
+        "Usa /pregunta <texto> para dudas generales o /web <texto> para ayuda "
+        "directa con la web.",
+    )
+
+
+async def ayuda(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    settings = _settings(context)
+    if await _reject_if_unauthorized(update, settings):
+        return
+    await _send_text(
+        update,
+        "Ejemplos de uso:\n\n"
+        "/pregunta Que secciones debe tener mi web?\n"
+        "/web Dame un index.html simple para mi proyecto\n"
+        "/plantilla_web\n"
+        "/rubrica\n\n"
+        "En un grupo tambien puedes mencionarme con @nombre_bot y escribir tu duda.",
+    )
+
+
+async def plantilla_web(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    settings = _settings(context)
+    if await _reject_if_unauthorized(update, settings):
+        return
+    await _send_text(update, PLANTILLA_WEB)
+
+
+async def rubrica(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    settings = _settings(context)
+    if await _reject_if_unauthorized(update, settings):
+        return
+    await _send_text(update, RUBRICA)
+
+
+async def estado(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    settings = _settings(context)
+    if await _reject_if_unauthorized(update, settings):
+        return
+    whitelist = "activa" if settings.whitelist_enabled else "inactiva"
+    chat = update.effective_chat
+    await _send_text(
+        update,
+        "Jaimito esta operativo.\n"
+        f"Modelo configurado: {settings.openai_model}\n"
+        f"Whitelist de chat: {whitelist}\n"
+        f"Chat ID actual: {chat.id if chat else 'no disponible'}",
+    )
+
+
+async def _handle_ai_request(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    command_or_trigger: str,
+    user_text: str,
+    extra_context: str | None = None,
+) -> None:
+    settings = _settings(context)
+    if await _reject_if_unauthorized(update, settings):
+        return
+
+    if not user_text.strip():
+        await _send_text(update, "Escribe tu consulta despues del comando.")
+        return
+
+    trace_id = new_trace_id()
+    chat = update.effective_chat
+    user = update.effective_user
+
+    try:
+        answer = ask_openai(
+            settings=settings,
+            trace_id=trace_id,
+            chat_id=chat.id if chat else None,
+            user_id=user.id if user else None,
+            command_or_trigger=command_or_trigger,
+            user_text=user_text.strip(),
+            extra_context=extra_context,
+        )
+        await _send_text(update, f"{answer}\n\ntrace_id: {trace_id}")
+    except OpenAIClientError as exc:
+        await _send_text(update, f"No puedo responder ahora: {exc}\ntrace_id: {trace_id}")
+
+
+async def pregunta(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await _handle_ai_request(
+        update,
+        context,
+        command_or_trigger="/pregunta",
+        user_text=" ".join(context.args),
+    )
+
+
+async def web(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await _handle_ai_request(
+        update,
+        context,
+        command_or_trigger="/web",
+        user_text=" ".join(context.args),
+        extra_context=WEB_CONTEXT,
+    )
+
+
+def _remove_bot_mention(text: str, bot_username: str | None) -> str:
+    if not bot_username:
+        return text
+    pattern = re.compile(rf"@{re.escape(bot_username)}\b", flags=re.IGNORECASE)
+    return pattern.sub("", text).strip()
+
+
+async def mention(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    message = update.effective_message
+    if not message or not message.text:
+        return
+
+    bot_username = context.bot.username
+    if not bot_username or f"@{bot_username.lower()}" not in message.text.lower():
+        return
+
+    user_text = _remove_bot_mention(message.text, bot_username)
+    await _handle_ai_request(
+        update,
+        context,
+        command_or_trigger="mention",
+        user_text=user_text,
+        extra_context=WEB_CONTEXT,
+    )
+
+
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    log_event(
+        "telegram_error",
+        trace_id=new_trace_id(),
+        status="error",
+        error_type=type(context.error).__name__ if context.error else None,
+    )
+
+
+def build_application(settings: Settings) -> Application:
+    application = Application.builder().token(settings.telegram_bot_token).build()
+    application.bot_data["settings"] = settings
+
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("ayuda", ayuda))
+    application.add_handler(CommandHandler("pregunta", pregunta))
+    application.add_handler(CommandHandler("web", web))
+    application.add_handler(CommandHandler("plantilla_web", plantilla_web))
+    application.add_handler(CommandHandler("rubrica", rubrica))
+    application.add_handler(CommandHandler("estado", estado))
+    application.add_handler(
+        MessageHandler(
+            filters.TEXT
+            & ~filters.COMMAND
+            & (filters.ChatType.GROUPS | filters.ChatType.PRIVATE),
+            mention,
+        )
+    )
+    application.add_error_handler(error_handler)
+    return application
+
+
+def main() -> None:
+    configure_logging()
+    settings = load_settings()
+    application = build_application(settings)
+    log_event(
+        "bot_start",
+        provider="telegram",
+        model=settings.openai_model,
+        whitelist_enabled=settings.whitelist_enabled,
+        status="ok",
+    )
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
+
+
+if __name__ == "__main__":
+    main()
