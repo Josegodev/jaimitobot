@@ -16,6 +16,7 @@ from prompts import PLANTILLA_WEB, QUESTION_CONTEXT, RUBRICA, WEB_CONTEXT
 
 
 MAX_TELEGRAM_MESSAGE_LENGTH = 300
+APP_VERSION = "hide-trace-id-2026-05-21"
 
 
 def _settings(context: ContextTypes.DEFAULT_TYPE) -> Settings:
@@ -267,6 +268,7 @@ def main() -> None:
     log_event(
         "bot_start",
         provider="telegram",
+        app_version=APP_VERSION,
         model=settings.openai_model,
         whitelist_enabled=settings.whitelist_enabled,
         status="ok",
