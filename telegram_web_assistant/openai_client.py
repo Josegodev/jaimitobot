@@ -7,7 +7,7 @@ from logging_utils import log_event
 from prompts import SYSTEM_PROMPT
 
 
-MAX_OUTPUT_TOKENS = 700
+MAX_OUTPUT_TOKENS = 1200
 OPENAI_TIMEOUT_SECONDS = 25
 
 

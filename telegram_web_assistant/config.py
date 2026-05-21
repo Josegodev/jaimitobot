@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 
 
 DEFAULT_MODEL = "gpt-4o-mini"
-DEFAULT_TEMPERATURE = 0.2
+DEFAULT_TEMPERATURE = 0.6
 
 
 @dataclass(frozen=True)

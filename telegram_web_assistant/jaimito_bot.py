@@ -15,7 +15,7 @@ from openai_client import OpenAIClientError, ask_openai
 from prompts import PLANTILLA_WEB, QUESTION_CONTEXT, RUBRICA, WEB_CONTEXT
 
 
-MAX_TELEGRAM_MESSAGE_LENGTH = 300
+TELEGRAM_MESSAGE_LIMIT = 3900
 APP_VERSION = "hide-trace-id-2026-05-21"
 
 
@@ -46,9 +46,40 @@ async def _send_text(update: Update, text: str) -> None:
         return
     # trace_id is kept in logs only; it is never exposed to Telegram users.
     clean_text = clean_user_message(text)
-    await update.effective_message.reply_text(
-        clean_text[:MAX_TELEGRAM_MESSAGE_LENGTH]
-    )
+    await update.effective_message.reply_text(clean_text[:TELEGRAM_MESSAGE_LIMIT])
+
+
+async def reply_long_text(message, text: str) -> None:
+    cleaned = clean_user_message(text)
+    if not cleaned:
+        await message.reply_text("No he podido generar una respuesta util.")
+        return
+
+    chunks = []
+    current = ""
+
+    for paragraph in cleaned.split("\n\n"):
+        paragraph = paragraph.strip()
+        if not paragraph:
+            continue
+
+        if len(current) + len(paragraph) + 2 <= TELEGRAM_MESSAGE_LIMIT:
+            current = f"{current}\n\n{paragraph}".strip()
+        else:
+            if current:
+                chunks.append(current)
+            if len(paragraph) <= TELEGRAM_MESSAGE_LIMIT:
+                current = paragraph
+            else:
+                for i in range(0, len(paragraph), TELEGRAM_MESSAGE_LIMIT):
+                    chunks.append(paragraph[i : i + TELEGRAM_MESSAGE_LIMIT])
+                current = ""
+
+    if current:
+        chunks.append(current)
+
+    for chunk in chunks:
+        await message.reply_text(chunk)
 
 
 async def _reject_if_unauthorized(update: Update, settings: Settings) -> bool:
@@ -166,7 +197,9 @@ async def _handle_ai_request(
             user_text=user_text.strip(),
             extra_context=extra_context,
         )
-        await _send_text(update, clean_user_message(answer))
+        if not update.effective_message:
+            return
+        await reply_long_text(update.effective_message, answer)
     except OpenAIClientError as exc:
         log_event(
             "bot_response_error",
