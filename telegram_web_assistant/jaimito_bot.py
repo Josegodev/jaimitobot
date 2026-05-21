@@ -12,7 +12,7 @@ from telegram.ext import (
 from config import Settings, load_settings
 from logging_utils import configure_logging, log_event, new_trace_id
 from openai_client import OpenAIClientError, ask_openai
-from prompts import PLANTILLA_WEB, RUBRICA, WEB_CONTEXT
+from prompts import PLANTILLA_WEB, QUESTION_CONTEXT, RUBRICA, WEB_CONTEXT
 
 
 MAX_TELEGRAM_MESSAGE_LENGTH = 3900
@@ -56,10 +56,20 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     await _send_text(
         update,
-        "Soy Jaimito, un asistente para el curso de IA aplicada. "
-        "Te ayudo a preparar una web estatica de proyecto para GitHub Pages.\n\n"
-        "Usa /pregunta <texto> para dudas generales o /web <texto> para ayuda "
-        "directa con la web.",
+        "Hola, soy Jaimito.\n\n"
+        "Te ayudo a preparar tu proyecto final del curso: una web sencilla donde "
+        "explicaras una idea de uso de IA para resolver un problema real.\n\n"
+        "Puedes pedirme ayuda para:\n"
+        "- elegir una idea,\n"
+        "- explicar el problema,\n"
+        "- ordenar las secciones de la web,\n"
+        "- escribir textos claros,\n"
+        "- preparar la presentacion final.\n\n"
+        "Usa:\n"
+        "/pregunta tu duda\n"
+        "/web ayuda especifica para tu web\n"
+        "/plantilla_web para ver las secciones recomendadas\n"
+        "/rubrica para ver como se valorara el proyecto",
     )
 
 
@@ -70,10 +80,13 @@ async def ayuda(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await _send_text(
         update,
         "Ejemplos de uso:\n\n"
-        "/pregunta Que secciones debe tener mi web?\n"
-        "/web Dame un index.html simple para mi proyecto\n"
+        "/pregunta No se que problema elegir para mi proyecto\n\n"
+        "/web Quiero hacer una web sobre una tienda que usa IA para responder "
+        "preguntas de clientes\n\n"
         "/plantilla_web\n"
         "/rubrica\n\n"
+        "No hace falta saber programar mucho. La idea es explicar bien el "
+        "problema, la solucion y como la IA puede ayudar.\n\n"
         "En un grupo tambien puedes mencionarme con @nombre_bot y escribir tu duda.",
     )
 
@@ -137,9 +150,18 @@ async def _handle_ai_request(
             user_text=user_text.strip(),
             extra_context=extra_context,
         )
-        await _send_text(update, f"{answer}\n\ntrace_id: {trace_id}")
+        await _send_text(update, answer)
     except OpenAIClientError as exc:
-        await _send_text(update, f"No puedo responder ahora: {exc}\ntrace_id: {trace_id}")
+        log_event(
+            "bot_response_error",
+            trace_id=trace_id,
+            chat_id=chat.id if chat else None,
+            user_id=user.id if user else None,
+            command_or_trigger=command_or_trigger,
+            status="error",
+            error_type=type(exc).__name__,
+        )
+        await _send_text(update, f"No puedo responder ahora: {exc}")
 
 
 async def pregunta(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -148,6 +170,7 @@ async def pregunta(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         context,
         command_or_trigger="/pregunta",
         user_text=" ".join(context.args),
+        extra_context=QUESTION_CONTEXT,
     )
 
 
