@@ -15,7 +15,7 @@ from openai_client import OpenAIClientError, ask_openai
 from prompts import PLANTILLA_WEB, QUESTION_CONTEXT, RUBRICA, WEB_CONTEXT
 
 
-MAX_TELEGRAM_MESSAGE_LENGTH = 3900
+MAX_TELEGRAM_MESSAGE_LENGTH = 300
 
 
 def _settings(context: ContextTypes.DEFAULT_TYPE) -> Settings:
@@ -29,10 +29,25 @@ def _is_allowed(update: Update, settings: Settings) -> bool:
     return chat.id in settings.telegram_allowed_chat_ids
 
 
+def clean_user_message(text: str) -> str:
+    """Remove internal trace data from messages sent to Telegram users."""
+    if not text:
+        return ""
+    lines = text.splitlines()
+    return "\n".join(
+        line for line in lines
+        if not line.strip().lower().startswith("trace_id:")
+    ).strip()
+
+
 async def _send_text(update: Update, text: str) -> None:
     if not update.effective_message:
         return
-    await update.effective_message.reply_text(text[:MAX_TELEGRAM_MESSAGE_LENGTH])
+    # trace_id is kept in logs only; it is never exposed to Telegram users.
+    clean_text = clean_user_message(text)
+    await update.effective_message.reply_text(
+        clean_text[:MAX_TELEGRAM_MESSAGE_LENGTH]
+    )
 
 
 async def _reject_if_unauthorized(update: Update, settings: Settings) -> bool:
@@ -150,7 +165,7 @@ async def _handle_ai_request(
             user_text=user_text.strip(),
             extra_context=extra_context,
         )
-        await _send_text(update, answer)
+        await _send_text(update, clean_user_message(answer))
     except OpenAIClientError as exc:
         log_event(
             "bot_response_error",
@@ -161,7 +176,10 @@ async def _handle_ai_request(
             status="error",
             error_type=type(exc).__name__,
         )
-        await _send_text(update, f"No puedo responder ahora: {exc}")
+        await _send_text(
+            update,
+            "No he podido responder ahora. Intentalo de nuevo en unos segundos.",
+        )
 
 
 async def pregunta(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
