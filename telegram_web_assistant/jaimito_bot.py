@@ -17,10 +17,20 @@ from prompts import PLANTILLA_WEB, QUESTION_CONTEXT, RUBRICA, WEB_CONTEXT
 
 TELEGRAM_MESSAGE_LIMIT = 3900
 APP_VERSION = "hide-trace-id-2026-05-21"
+COURSE_LINK = "https://josegodev.github.io/CURSO_IA/"
+# In-memory counters are acceptable for this classroom bot. They reset on container restart.
+QUESTION_COUNTS: dict[str, int] = {}
+COURSE_LINK_SENT: set[str] = set()
 
 
 def _settings(context: ContextTypes.DEFAULT_TYPE) -> Settings:
     return context.application.bot_data["settings"]
+
+
+def get_user_chat_key(update: Update) -> str:
+    chat_id = update.effective_chat.id if update.effective_chat else "unknown_chat"
+    user_id = update.effective_user.id if update.effective_user else "unknown_user"
+    return f"{chat_id}:{user_id}"
 
 
 def _is_allowed(update: Update, settings: Settings) -> bool:
@@ -80,6 +90,33 @@ async def reply_long_text(message, text: str) -> None:
 
     for chunk in chunks:
         await message.reply_text(chunk)
+
+
+async def maybe_send_course_link(update: Update) -> None:
+    message = update.effective_message
+    if not message:
+        return
+
+    key = get_user_chat_key(update)
+    QUESTION_COUNTS[key] = QUESTION_COUNTS.get(key, 0) + 1
+
+    if QUESTION_COUNTS[key] < 2 or key in COURSE_LINK_SENT:
+        return
+
+    COURSE_LINK_SENT.add(key)
+    chat = update.effective_chat
+    user = update.effective_user
+    log_event(
+        "course_link_sent",
+        chat_id=chat.id if chat else None,
+        user_id=user.id if user else None,
+        question_count=QUESTION_COUNTS[key],
+        status="ok",
+    )
+    await message.reply_text(
+        "Por cierto, aqui tienes la web del curso para continuar con el proyecto:\n"
+        f"{COURSE_LINK}"
+    )
 
 
 async def _reject_if_unauthorized(update: Update, settings: Settings) -> bool:
@@ -200,6 +237,7 @@ async def _handle_ai_request(
         if not update.effective_message:
             return
         await reply_long_text(update.effective_message, answer)
+        await maybe_send_course_link(update)
     except OpenAIClientError as exc:
         log_event(
             "bot_response_error",
